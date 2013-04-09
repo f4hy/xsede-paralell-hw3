@@ -1,0 +1,37 @@
+#! /bin/csh 
+#PBS -l walltime=10:00 
+#PBS -l ncpus=256 
+#PBS -o auto-knapsack.out 
+#PBS -j oe 
+#PBS -q batch 
+#PBS -A TG-CCR130008
+
+#set echo  
+
+cd $PBS_O_WORKDIR
+
+# make module command available     
+source /usr/share/modules/init/csh  
+
+# load the upc module
+module load sgi-upc-devel  
+
+#removing old data
+rm knapsack_sum.txt
+# execute
+./serial -n 5000 -c 999 -s knapsack_sum.txt  
+mpirun -np 1 ./knapsack -n 5000 -c 999 -s knapsack_sum.txt
+mpirun -np 2 ./knapsack -n 5000 -c 999 -s knapsack_sum.txt
+mpirun -np 4 ./knapsack -n 5000 -c 999 -s knapsack_sum.txt
+mpirun -np 8 ./knapsack -n 5000 -c 999 -s knapsack_sum.txt
+mpirun -np 16 ./knapsack -n 5000 -c 999 -s knapsack_sum.txt
+mpirun -np 32 ./knapsack -n 5000 -c 999 -s knapsack_sum.txt
+mpirun -np 64 ./knapsack -n 5000 -c 999 -s knapsack_sum.txt
+mpirun -np 96 ./knapsack -n 5000 -c 999 -s knapsack_sum.txt
+mpirun -np 128 ./knapsack -n 5000 -c 999 -s knapsack_sum.txt
+mpirun -np 192 ./knapsack -n 5000 -c 999 -s knapsack_sum.txt
+mpirun -np 256 ./knapsack -n 5000 -c 999 -s knapsack_sum.txt
+
+
+
+

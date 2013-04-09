@@ -1,0 +1,20 @@
+#! /bin/csh 
+#PBS -l walltime=5:00 
+#PBS -l ncpus=16 
+#PBS -o knapsack.out 
+#PBS -j oe 
+#PBS -q batch 
+#PBS -A TG-CCR130008
+
+#set echo  
+
+cd $PBS_O_WORKDIR
+
+# make module command available     
+source /usr/share/modules/init/csh  
+
+# load the upc module
+module load sgi-upc-devel  
+
+# execute  
+mpirun -np $PBS_NCPUS ./knapsack -n 5000 -c 999
