@@ -86,19 +86,19 @@ int main( int argc, char **argv )
 
 	sse_avg=0.0;
 	for (i=0; i<num; i++){
-      sse_avg+=sse[i];
-	  if (p[i]==16) 
+          sse_avg+=sse[i];
+	  if (p[i+1]==16)
 	    break;
-    }
+        }
 	nt16=i+1;
 	sse_avg/=nt16;
 	  
 	  printf("Average strong scaling efficiency (1-16): %7.2lf \n\n",sse_avg);
 	  
 	lsse_avg=0.0;
-	for (i--; i<num; i++){
-      lsse_avg+=sse[i];
-    }
+	for (; i<num; i++){
+          lsse_avg+=sse[i];
+        }
 	lsse_avg/=num-nt16+1;
 	
 	  printf("Average strong scaling efficiency (16-256): %7.2lf \n\n",lsse_avg);

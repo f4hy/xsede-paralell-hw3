@@ -3,7 +3,7 @@
 #PBS -l ncpus=16 
 #PBS -o serial.out 
 #PBS -j oe 
-#PBS -q batch 
+#PBS -q debug 
 #PBS -A TG-CCR130008
 
 #set echo  
@@ -17,4 +17,4 @@ source /usr/share/modules/init/csh
 module load sgi-upc-devel  
 
 # execute  
-./serial -n 5000 -c 999
+./serial -n 50000 -c 9999
