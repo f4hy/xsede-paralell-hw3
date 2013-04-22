@@ -13,3 +13,6 @@
 *.a
 /autograder
 /serial
+/knapsack
+knapsack.w2c.*
+*.out
