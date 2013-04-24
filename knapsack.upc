@@ -8,14 +8,16 @@
 
 #define NRITEMS 50000
 #define MAXCAPACITY 9999
+#define PRINT 0
+#define BLOCKING (MAXCAPACITY+1)/4
 //
 // auxiliary functions
 //
 inline int max( int a, int b ) { return a > b ? a : b; }
 inline int min( int a, int b ) { return a < b ? a : b; }
 
-shared [MAXCAPACITY+1] int *table;
-shared [MAXCAPACITY+1] int *ready;
+shared [BLOCKING] int *table;
+shared [BLOCKING] int *ready;
 
 
 double read_timer( )
@@ -61,17 +63,60 @@ char *read_string( int argc, char **argv, const char *option, char *default_valu
     return default_value;
 }
 
+void print_table(int nitems, int cap, shared [BLOCKING] int *T){
+    int i, j;
+    if( MYTHREAD != 0 ){
+        printf("\n");
+        for(j=0; j< nitems; j++){
+            for(i=0; i < (cap+1); i++){
+                printf("%02d ", T[i+j*(cap+1)]);
+            }
+            printf("\n");
+        }
+        printf("\n");
+    }
+}
+
+void print_table_affinity(int nitems, int cap, shared [BLOCKING] int *T){
+    int i, j;
+    if( MYTHREAD != 0 ){
+        printf("\n");
+        for(j=0; j< nitems; j++){
+            for(i=0; i < (cap+1); i++){
+                printf("%02d ", upc_threadof(&T[i+j*(cap+1)]));
+            }
+            printf("\n");
+        }
+        printf("\n");
+    }
+}
+
+
+void print_table_s(int nitems, int cap, int *T){
+    int i, j;
+    printf("\n");
+    for(j=0; j< nitems; j++){
+        for(i=0; i < (cap+1); i++){
+            printf("%02d ", T[i+j*(cap+1)]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+
+}
 //
 //  solvers
 //
-int build_table( int nitems, int cap, shared [MAXCAPACITY+1] int *T, shared [MAXCAPACITY+1] int *ready, shared int *w, shared int *v )
+int build_table( int nitems, int cap, shared [BLOCKING] int *T, shared [BLOCKING] int *ready, shared int *w, shared int *v )
 {
     int wj, vj;
     double mytimer;
     double mytimer1;
     double starttime;
+    shared [BLOCKING] int *origin = T;
     starttime = read_timer();
 
+    
     wj = w[0];
     vj = v[0];
 	
@@ -124,13 +169,17 @@ int build_table( int nitems, int cap, shared [MAXCAPACITY+1] int *T, shared [MAX
     /* mytimer = read_timer() - mytimer; */
     printf("I am %d and build_table main loop 0 took: %g \n", MYTHREAD, mytimer);
     printf("I am %d and build_table main loop 1 took: %g \n", MYTHREAD, mytimer1);
-
+#if PRINT==1
+    print_table(nitems, cap, origin);
+    print_table_affinity(nitems, cap, origin);
+#endif
+    upc_barrier;
     if( MYTHREAD != 0 )
         return 0;
     return T[cap];
 }
 
-void backtrack( int nitems, int cap, shared [MAXCAPACITY+1] int *T, shared int *w, shared int *u )
+void backtrack( int nitems, int cap, shared [BLOCKING] int *T, shared int *w, shared int *u )
 {
     int i, j;
 
@@ -153,8 +202,10 @@ int solve_serial( int nitems, int cap, shared int *w, shared int *v )
 {
     int i, j, best, *allocated, *T, wj, vj;
 
+    int *origin;
     //alloc local resources
     T = allocated = malloc( nitems*(cap+1)*sizeof(int) );
+    origin = T;
     if( !allocated )
     {
         fprintf( stderr, "Failed to allocate memory" );
@@ -228,8 +279,8 @@ int main( int argc, char** argv )
     value  = (shared int *) upc_all_alloc( nitems, sizeof(int) );
     used   = (shared int *) upc_all_alloc( nitems, sizeof(int) );
     //allocate distributed arrays, use blocked distribution
-    table =  (shared [MAXCAPACITY+1] int *) upc_all_alloc(nitems, (capacity+1)*sizeof(int));
-    ready =  (shared [MAXCAPACITY+1] int *) upc_all_alloc(nitems, (capacity+1)*sizeof(int));
+    table =  (shared [BLOCKING] int *) upc_all_alloc(nitems*4, ((capacity+1)/4)*sizeof(int));
+ready =  (shared [BLOCKING] int *) upc_all_alloc(nitems*4, ((capacity+1)/4)*sizeof(int));
     if( !weight || !value || !used || !table )
     {
         fprintf( stderr, "Failed to allocate memory" );
@@ -247,7 +298,26 @@ int main( int argc, char** argv )
         weight[i] = 1 + (lrand48()%max_weight);
         value[i]  = 1 + (lrand48()%max_value);
     }
+    /* value[0] = 2; */
+    /* value[1] = 3; */
+    /* value[2] = 3; */
+    /* value[3] = 4; */
+    /* value[4] = 4; */
+    /* value[5] = 5; */
+    /* value[6] = 7; */
+    /* value[7] = 8; */
+    /* value[8] = 8; */
 
+    /* weight[0] = 3; */
+    /* weight[1] = 5; */
+    /* weight[2] = 7; */
+    /* weight[3] = 4; */
+    /* weight[4] = 3; */
+    /* weight[5] = 9; */
+    /* weight[6] = 2; */
+    /* weight[7] = 11; */
+    /* weight[8] = 5; */
+    
     upc_barrier;
 
     // time the solution
