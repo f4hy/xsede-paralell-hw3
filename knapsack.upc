@@ -3,13 +3,21 @@
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
-#include <upc.h>
+#include <upc_relaxed.h>
+#include <math.h>
 
+#define NRITEMS 50000
+#define MAXCAPACITY 9999
 //
 // auxiliary functions
 //
 inline int max( int a, int b ) { return a > b ? a : b; }
 inline int min( int a, int b ) { return a < b ? a : b; }
+
+shared [MAXCAPACITY+1] int *table;
+shared [MAXCAPACITY+1] int *ready;
+
+
 double read_timer( )
 {
     static int initialized = 0;
@@ -56,16 +64,22 @@ char *read_string( int argc, char **argv, const char *option, char *default_valu
 //
 //  solvers
 //
-int build_table( int nitems, int cap, shared int *T, shared int *w, shared int *v )
+int build_table( int nitems, int cap, shared [MAXCAPACITY+1] int *T, shared [MAXCAPACITY+1] int *ready, shared int *w, shared int *v )
 {
     int wj, vj;
 
     wj = w[0];
     vj = v[0];
 	
-	int i;
-    upc_forall( i = 0;  i <  wj;  i++; &T[i] ) T[i] = 0;
-    upc_forall( i = wj; i <= cap; i++; &T[i] ) T[i] = vj;
+    int i;
+    upc_forall( i = 0;  i <  wj;  i++; &T[i] ){
+        T[i] = 0;
+        ready[i] = 1;
+    }
+    upc_forall( i = wj; i <= cap; i++; &T[i] ){
+        T[i] = vj;
+        ready[i] = 1;
+    }
     upc_barrier;
 
 	int j;
@@ -73,18 +87,31 @@ int build_table( int nitems, int cap, shared int *T, shared int *w, shared int *
     {
         wj = w[j];
         vj = v[j];
-		int i;
-        upc_forall( i = 0;  i <  wj;  i++; &T[i] ) T[i+cap+1] = T[i];
-        upc_forall( i = wj; i <= cap; i++; &T[i] ) T[i+cap+1] = max( T[i], T[i-wj]+vj );
-        upc_barrier;
+        int i;
+        upc_forall( i = 0;  i <  wj;  i++; &T[i] ){
+            /* while(ready[i] < 1){fprintf( stderr, "waiting\n" );} */
+            while(ready[i] < 1){}
+            T[i+cap+1] = T[i];
+            ready[i+cap+1] = 1;
+        }
+        upc_forall( i = wj; i <= cap; i++; &T[i] ){
+            while(ready[i] < 1){ }
+            while(ready[i-wj] < 1){ }
+            /* while(ready[i] < 1){ fprintf( stderr, "waiting\n" );} */
+            /* while(ready[i-wj] < 1){ fprintf( stderr, "waiting\n" );} */
+            T[i+cap+1] = max( T[i], T[i-wj]+vj );
+            ready[i+cap+1] = 1;
+        }
+        /* upc_barrier; */
 
         T += cap+1;
+        ready += cap+1;
     }
 
     return T[cap];
 }
 
-void backtrack( int nitems, int cap, shared int *T, shared int *w, shared int *u )
+void backtrack( int nitems, int cap, shared [MAXCAPACITY+1] int *T, shared int *w, shared int *u )
 {
     int i, j;
 
@@ -165,8 +192,12 @@ int main( int argc, char** argv )
     //reading in problem size
     int capacity   = read_int( argc, argv, "-c", 999 );
     int nitems     = read_int( argc, argv, "-n", 5000 );
-	
-	
+
+
+    /* Added to use the fixed sizes */
+    capacity = MAXCAPACITY;
+    nitems = NRITEMS;
+
 
     srand48( (unsigned int)time(NULL) + MYTHREAD );
 
@@ -174,11 +205,16 @@ int main( int argc, char** argv )
     weight = (shared int *) upc_all_alloc( nitems, sizeof(int) );
     value  = (shared int *) upc_all_alloc( nitems, sizeof(int) );
     used   = (shared int *) upc_all_alloc( nitems, sizeof(int) );
-    total  = (shared int *) upc_all_alloc( nitems * (capacity+1), sizeof(int) );
-    if( !weight || !value || !total || !used )
+    table =  (shared [MAXCAPACITY+1] int *) upc_all_alloc(nitems, (capacity+1)*sizeof(int));
+    ready =  (shared [MAXCAPACITY+1] int *) upc_all_alloc(nitems, (capacity+1)*sizeof(int));
+    if( !weight || !value || !used || !table )
     {
         fprintf( stderr, "Failed to allocate memory" );
         upc_global_exit( -1 );
+    }
+
+    upc_forall( i = 0;  i <  nitems*(capacity+1);  i++; &ready[i] ){
+        ready[i] = 0;
     }
 
     // init
@@ -194,8 +230,8 @@ int main( int argc, char** argv )
     // time the solution
     seconds = read_timer( );
 
-    best_value = build_table( nitems, capacity, total, weight, value );
-    backtrack( nitems, capacity, total, weight, used );
+    best_value = build_table( nitems, capacity, table, ready, weight, value );
+    backtrack( nitems, capacity, table, weight, used );
 
     seconds = read_timer( ) - seconds;
 
@@ -219,15 +255,15 @@ int main( int argc, char** argv )
 
         if( best_value != best_value_serial || best_value != total_value || total_weight > capacity )
             printf( "WRONG SOLUTION\n" );
-		
-		// Doing summary data
-		char *sumname = read_string( argc, argv, "-s", NULL );
-		FILE *fsum = sumname ? fopen ( sumname, "a" ) : NULL;
-		if( fsum) 
-			fprintf(fsum,"%d %d %d %g\n",nitems,capacity,THREADS,seconds);
-		if( fsum )
-			fclose( fsum );    
-		
+
+                // Doing summary data
+                char *sumname = read_string( argc, argv, "-s", NULL );
+                FILE *fsum = sumname ? fopen ( sumname, "a" ) : NULL;
+                if( fsum)
+                        fprintf(fsum,"%d %d %d %g\n",nitems,capacity,THREADS,seconds);
+                if( fsum )
+                        fclose( fsum );
+
 
         //release resources
         upc_free( weight );
