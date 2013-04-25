@@ -9,7 +9,8 @@
 #define NRITEMS 50000
 #define MAXCAPACITY 9999
 #define PRINT 0
-#define BLOCKING (MAXCAPACITY+1)/4
+#define BCOUNT 1
+#define BLOCKING NRITEMS*BCOUNT
 //
 // auxiliary functions
 //
@@ -65,11 +66,11 @@ char *read_string( int argc, char **argv, const char *option, char *default_valu
 
 void print_table(int nitems, int cap, shared [BLOCKING] int *T){
     int i, j;
-    if( MYTHREAD != 0 ){
+    if( MYTHREAD == 0 ){
         printf("\n");
-        for(j=0; j< nitems; j++){
-            for(i=0; i < (cap+1); i++){
-                printf("%02d ", T[i+j*(cap+1)]);
+        for(i=0; i< nitems; i++){
+            for(j=0; j < (cap+1); j++){
+                    printf("%02d ", T[i+j*nitems]);
             }
             printf("\n");
         }
@@ -79,11 +80,11 @@ void print_table(int nitems, int cap, shared [BLOCKING] int *T){
 
 void print_table_affinity(int nitems, int cap, shared [BLOCKING] int *T){
     int i, j;
-    if( MYTHREAD != 0 ){
+    if( MYTHREAD == 0 ){
         printf("\n");
-        for(j=0; j< nitems; j++){
-            for(i=0; i < (cap+1); i++){
-                printf("%02d ", upc_threadof(&T[i+j*(cap+1)]));
+        for(i=0; i< nitems; i++){
+            for(j=0; j < (cap+1); j++){
+                printf("%02d ", upc_threadof(&T[i+j*nitems]));
             }
             printf("\n");
         }
@@ -95,21 +96,23 @@ void print_table_affinity(int nitems, int cap, shared [BLOCKING] int *T){
 void print_table_s(int nitems, int cap, int *T){
     int i, j;
     printf("\n");
-    for(j=0; j< nitems; j++){
         for(i=0; i < (cap+1); i++){
-            printf("%02d ", T[i+j*(cap+1)]);
+            for(j=0; j< nitems; j++){
+            printf("%02d ", T[j+i*nitems]);
         }
         printf("\n");
     }
     printf("\n");
 
 }
+
 //
 //  solvers
 //
 int build_table( int nitems, int cap, shared [BLOCKING] int *T, shared [BLOCKING] int *ready, shared int *w, shared int *v )
 {
     int wj, vj;
+    int wi, vi;
     double mytimer;
     double mytimer1;
     double starttime;
@@ -119,16 +122,20 @@ int build_table( int nitems, int cap, shared [BLOCKING] int *T, shared [BLOCKING
     
     wj = w[0];
     vj = v[0];
-	
+
     int i;
-    upc_forall( i = 0;  i <  wj;  i++; &T[i] ){
-        T[i] = 0;
-        ready[i] = 1;
+    int j;
+    upc_forall( j = 0;  j <  wj;  j++; &T[j*nitems] ){
+        T[j*nitems] = 0;
+        ready[j*nitems] = 1;
     }
-    upc_forall( i = wj; i <= cap; i++; &T[i] ){
-        T[i] = vj;
-        ready[i] = 1;
+    upc_forall( j = wj; j <= cap; j++; &T[j*nitems] ){
+        T[j*nitems] = vj;
+        ready[j*nitems] = 1;
     }
+
+    /* print_table(nitems, cap, origin); */
+
     mytimer = read_timer() - starttime;
     upc_barrier;
     mytimer1 = read_timer() - starttime;
@@ -137,38 +144,79 @@ int build_table( int nitems, int cap, shared [BLOCKING] int *T, shared [BLOCKING
     
     mytimer = 0;
     mytimer1 = 0;
-    int j;
-    for(j = 1; j < nitems; j++ )
-    {
-        wj = w[j];
-        vj = v[j];
-        int i;
-        starttime = read_timer();
-        upc_forall( i = 0;  i <  wj;  i++; &T[i] ){
-            /* while(ready[i] < 1){fprintf( stderr, "waiting\n" );} */
-            while(ready[i] < 1){}
-            T[i+cap+1] = T[i];
-            ready[i+cap+1] = 1;
-        }
-        mytimer += read_timer() - starttime;
-        starttime = read_timer();
-        upc_forall( i = wj; i <= cap; i++; &T[i] ){
-            while(ready[i] < 1){ }
-            while(ready[i-wj] < 1){ }
-            /* while(ready[i] < 1){ fprintf( stderr, "waiting\n" );} */
-            /* while(ready[i-wj] < 1){ fprintf( stderr, "waiting\n" );} */
-            T[i+cap+1] = max( T[i], T[i-wj]+vj );
-            ready[i+cap+1] = 1;
-        }
-        mytimer1 += read_timer() - starttime;
-        /* upc_barrier; */
+    int column =0;
 
-        T += cap+1;
-        ready += cap+1;
+    /*
+     * memory is set up
+     *
+     *  |   0 | nitems   |
+     *  |   1 | nitems+1 |
+     *  |   2 | ...      |
+     *  |   3 |          |
+     *  |   4 |          |
+     *  | ... |          |
+     *
+     * T[i,j] = T[i+j*nitems]
+     *
+     *
+     * 
+     */
+    int shift = 0;
+    int end =0;
+    /* for(column = 0; column< /BCOUNT; column++){ */
+    printf("BCOUNT %d, need to do %d times", BCOUNT, (MAXCAPACITY+1)/BCOUNT);
+    for(column = 0; column< (MAXCAPACITY/BCOUNT)+1; column++){
+        for(i=1; i<nitems; i++){
+            shift = column*BCOUNT;
+            end = min(shift+BCOUNT, MAXCAPACITY+1);
+            upc_forall(j=shift; j<end; j++; &T[i+j*nitems]){
+                /* w_i > w */
+                if(w[i] > j){
+                    T[i+j*nitems] = T[(i-1)+j*nitems];
+                    ready[i+j*nitems] = 1;
+                }
+                else{
+                    while(ready[(i-1)+(j-w[i])*nitems] < 1){ }
+                    T[i+j*nitems] = max(T[(i-1)+j*nitems],T[(i-1)+(j-w[i])*nitems]+v[i]);
+                    ready[i+j*nitems] = 1;
+                }
+                
+            }                
+        }
+        
     }
-    /* mytimer = read_timer() - mytimer; */
-    printf("I am %d and build_table main loop 0 took: %g \n", MYTHREAD, mytimer);
-    printf("I am %d and build_table main loop 1 took: %g \n", MYTHREAD, mytimer1);
+
+    /* for(j = 1; j < nitems; j++ ) */
+    /* { */
+    /*     wj = w[j]; */
+    /*     vj = v[j]; */
+    /*     int i; */
+    /*     starttime = read_timer(); */
+    /*     upc_forall( i = 0;  i <  wj;  i++; &T[i] ){ */
+    /*         /\* while(ready[i] < 1){fprintf( stderr, "waiting\n" );} *\/ */
+    /*         while(ready[i] < 1){} */
+    /*         T[i+cap+1] = T[i]; */
+    /*         ready[i+cap+1] = 1; */
+    /*     } */
+    /*     mytimer += read_timer() - starttime; */
+    /*     starttime = read_timer(); */
+    /*     upc_forall( i = wj; i <= cap; i++; &T[i] ){ */
+    /*         while(ready[i] < 1){ } */
+    /*         while(ready[i-wj] < 1){ } */
+    /*         /\* while(ready[i] < 1){ fprintf( stderr, "waiting\n" );} *\/ */
+    /*         /\* while(ready[i-wj] < 1){ fprintf( stderr, "waiting\n" );} *\/ */
+    /*         T[i+cap+1] = max( T[i], T[i-wj]+vj ); */
+    /*         ready[i+cap+1] = 1; */
+    /*     } */
+    /*     mytimer1 += read_timer() - starttime; */
+    /*     /\* upc_barrier; *\/ */
+
+    /*     /\* T += cap+1; *\/ */
+    /*     /\* ready += cap+1; *\/ */
+    /* } */
+    /* /\* mytimer = read_timer() - mytimer; *\/ */
+    /* printf("I am %d and build_table main loop 0 took: %g \n", MYTHREAD, mytimer); */
+    /* printf("I am %d and build_table main loop 1 took: %g \n", MYTHREAD, mytimer1); */
 #if PRINT==1
     print_table(nitems, cap, origin);
     print_table_affinity(nitems, cap, origin);
@@ -176,23 +224,28 @@ int build_table( int nitems, int cap, shared [BLOCKING] int *T, shared [BLOCKING
     upc_barrier;
     if( MYTHREAD != 0 )
         return 0;
-    return T[cap];
+    return T[(cap+1)*nitems-1];
 }
 
 void backtrack( int nitems, int cap, shared [BLOCKING] int *T, shared int *w, shared int *u )
 {
-    int i, j;
-
     if( MYTHREAD != 0 )
         return;
-
-    i = nitems*(cap+1) - 1;
-    for( j = nitems-1; j > 0; j-- )
-    {
-        u[j] = T[i] != T[i-cap-1];
-        i -= cap+1 + (u[j] ? w[j] : 0 );
+    int index;
+    index = nitems*(cap+1) - 1;
+    int item;
+    for(item=nitems-1; item >0; item--){
+        u[item] = T[index] != T[index-1];
+        index -= 1 + nitems*(u[item] ? w[item] : 0 );
     }
-    u[0] = T[i] != 0;
+    u[0] = T[index] != 0; 
+    /* i = nitems*(cap+1) - 1; */
+    /* for( j = nitems-1; j > 0; j-- ) */
+    /* { */
+    /*     u[j] = T[i] != T[i-cap-1]; */
+    /*     i -= cap+1 + (u[j] ? w[j] : 0 ); */
+    /* } */
+    /* u[0] = T[i] != 0; */
 }
 
 //
@@ -279,8 +332,8 @@ int main( int argc, char** argv )
     value  = (shared int *) upc_all_alloc( nitems, sizeof(int) );
     used   = (shared int *) upc_all_alloc( nitems, sizeof(int) );
     //allocate distributed arrays, use blocked distribution
-    table =  (shared [BLOCKING] int *) upc_all_alloc(nitems*4, ((capacity+1)/4)*sizeof(int));
-ready =  (shared [BLOCKING] int *) upc_all_alloc(nitems*4, ((capacity+1)/4)*sizeof(int));
+    table =  (shared [BLOCKING] int *) upc_all_alloc((nitems*(capacity+1))/BLOCKING, BLOCKING*sizeof(int));
+    ready =  (shared [BLOCKING] int *) upc_all_alloc((nitems*(capacity+1))/BLOCKING, BLOCKING*sizeof(int));
     if( !weight || !value || !used || !table )
     {
         fprintf( stderr, "Failed to allocate memory" );
