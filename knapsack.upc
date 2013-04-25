@@ -79,12 +79,12 @@ void print_table(int nitems, int cap, shared [BLOCKING] int *T){
 }
 
 void print_table_affinity(int nitems, int cap, shared [BLOCKING] int *T){
-    int i, j;
+    size_t i, j;
     if( MYTHREAD == 0 ){
         printf("\n");
         for(i=0; i< nitems; i++){
             for(j=0; j < (cap+1); j++){
-                printf("%02d ", upc_threadof(&T[i+j*nitems]));
+                printf("%02ul ",(unsigned int) upc_threadof(&T[i+j*nitems]));
             }
             printf("\n");
         }
@@ -111,39 +111,26 @@ void print_table_s(int nitems, int cap, int *T){
 //
 int build_table( int nitems, int cap, shared [BLOCKING] int *T, shared int *w, shared int *v )
 {
-    int wj, vj;
     int wi, vi;
-    double mytimer;
-    double mytimer1;
-    double starttime;
-    shared [BLOCKING] int *origin = T;
-    starttime = read_timer();
-
+    size_t column;
+    size_t shift, end;
+    size_t i, j;
     
-    wj = w[0];
-    vj = v[0];
+    wi = w[0];
+    vi = v[0];
 
-    int i;
-    int j;
-    upc_forall( j = 0;  j <  wj;  j++; &T[j*nitems] ){
+    upc_forall( j = 0;  j <  wi;  j++; &T[j*nitems] ){
         T[j*nitems] = 0;
     }
-    upc_forall( j = wj; j <= cap; j++; &T[j*nitems] ){
-        T[j*nitems] = vj;
+    upc_forall( j = wi; j <= cap; j++; &T[j*nitems] ){
+        T[j*nitems] = vi;
     }
 
-    /* print_table(nitems, cap, origin); */
-
-    mytimer = read_timer() - starttime;
-    upc_barrier;
-    mytimer1 = read_timer() - starttime;
-    printf("I am %d and setup took: %g \n", MYTHREAD, mytimer);
-    printf("I am %d and setup took +barrier: %g \n", MYTHREAD, mytimer1);
     
-    mytimer = 0;
-    mytimer1 = 0;
-    int column =0;
+    
+    /* upc_barrier; */
 
+    
     /*
      * memory is set up
      *
@@ -160,9 +147,7 @@ int build_table( int nitems, int cap, shared [BLOCKING] int *T, shared int *w, s
      * 
      */
     /* print_table_affinity(nitems, cap, origin); */
-    int shift = 0;
-    int end =0;
-    int* local_T;
+    int* local_T = (int *)&T;
     /* for(column = 0; column< /BCOUNT; column++){ */
     for(column = 0; column< (MAXCAPACITY/BCOUNT)+1; column++){
         shift = column*BCOUNT;
@@ -181,7 +166,6 @@ int build_table( int nitems, int cap, shared [BLOCKING] int *T, shared int *w, s
                     local_T[i+(j-shift)*nitems] = local_T[(i-1)+(j-shift)*nitems];
                 }
                 else{
-                    
                     while(T[(i-1)+(j-w[i])*nitems] < 0){ }
                     local_T[i+(j-shift)*nitems] = max(local_T[(i-1)+(j-shift)*nitems],T[(i-1)+(j-wi)*nitems]+vi);
                 }
@@ -229,10 +213,8 @@ int solve_serial( int nitems, int cap, shared int *w, shared int *v )
 {
     int i, j, best, *allocated, *T, wj, vj;
 
-    int *origin;
     //alloc local resources
     T = allocated = malloc( nitems*(cap+1)*sizeof(int) );
-    origin = T;
     if( !allocated )
     {
         fprintf( stderr, "Failed to allocate memory" );
@@ -271,7 +253,6 @@ int main( int argc, char** argv )
     shared int *weight;
     shared int *value;
     shared int *used;
-    shared int *total;
 
 	if( find_option( argc, argv, "-h" ) >= 0 )
     {
@@ -400,7 +381,6 @@ int main( int argc, char** argv )
         //release resources
         upc_free( weight );
         upc_free( value );
-        upc_free( total );
         upc_free( used );
     }
 
