@@ -119,11 +119,13 @@ int build_table( int nitems, int cap, shared [BLOCKING] int *T, shared int *w, s
     wi = w[0];
     vi = v[0];
 
-    upc_forall( j = 0;  j <  wi;  j++; &T[j*nitems] ){
-        T[j*nitems] = 0;
+    unsigned long n = nitems;
+
+    upc_forall( j = 0;  j <  wi;  j++; &T[j*n] ){
+        T[j*n] = 0;
     }
-    upc_forall( j = wi; j <= cap; j++; &T[j*nitems] ){
-        T[j*nitems] = vi;
+    upc_forall( j = wi; j <= cap; j++; &T[j*n] ){
+        T[j*n] = vi;
     }
 
     
@@ -146,28 +148,28 @@ int build_table( int nitems, int cap, shared [BLOCKING] int *T, shared int *w, s
      *
      * 
      */
-    /* print_table_affinity(nitems, cap, origin); */
+    /* print_table_affinity(n, cap, origin); */
     int* local_T = (int *)&T;
     /* for(column = 0; column< /BCOUNT; column++){ */
     for(column = 0; column< (MAXCAPACITY/BCOUNT)+1; column++){
         shift = column*BCOUNT;
         end = min(shift+BCOUNT, MAXCAPACITY+1);
-        if(MYTHREAD == upc_threadof(&T[shift*nitems])){
-            local_T = (int *)&T[shift*nitems];
+        if(MYTHREAD == upc_threadof(&T[shift*n])){
+            local_T = (int *)&T[shift*n];
         }
-        upc_forall(i=1; i<nitems; i++; &T[i+shift*nitems]){
+        upc_forall(i=1; i<n; i++; &T[i+shift*n]){
             wi = w[i];
             vi = v[i];
-            /* upc_forall(j=shift; j<end; j++; &T[i+j*nitems]){ */
+            /* upc_forall(j=shift; j<end; j++; &T[i+j*n]){ */
             for(j=shift; j<end; j++){
-                /* assert( upc_threadof(&T[i+j*nitems]) == MYTHREAD); */
+                /* assert( upc_threadof(&T[i+j*n]) == MYTHREAD); */
                 /* w_i > w */
                 if(w[i] > j){
-                    local_T[i+(j-shift)*nitems] = local_T[(i-1)+(j-shift)*nitems];
+                    local_T[i+(j-shift)*n] = local_T[(i-1)+(j-shift)*n];
                 }
                 else{
-                    while(T[(i-1)+(j-w[i])*nitems] < 0){ }
-                    local_T[i+(j-shift)*nitems] = max(local_T[(i-1)+(j-shift)*nitems],T[(i-1)+(j-wi)*nitems]+vi);
+                    while(T[(i-1)+(j-w[i])*n] < 0){ }
+                    local_T[i+(j-shift)*n] = max(local_T[(i-1)+(j-shift)*n],T[(i-1)+(j-wi)*n]+vi);
                 }
                 
             }                
@@ -176,13 +178,13 @@ int build_table( int nitems, int cap, shared [BLOCKING] int *T, shared int *w, s
     }
 
 #if PRINT==1
-    print_table(nitems, cap, origin);
-    print_table_affinity(nitems, cap, origin);
+    print_table(n, cap, origin);
+    print_table_affinity(n, cap, origin);
 #endif
     upc_barrier;
     if( MYTHREAD != 0 )
         return 0;
-    return T[(cap+1)*nitems-1];
+    return T[(cap+1)*n-1];
 }
 
 void backtrack( int nitems, int cap, shared [BLOCKING] int *T, shared int *w, shared int *u )
