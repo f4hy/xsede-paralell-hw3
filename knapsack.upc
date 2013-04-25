@@ -9,7 +9,7 @@
 #define NRITEMS 50000
 #define MAXCAPACITY 9999
 #define PRINT 0
-#define BCOUNT 1
+#define BCOUNT 20
 #define BLOCKING NRITEMS*BCOUNT
 //
 // auxiliary functions
@@ -161,24 +161,34 @@ int build_table( int nitems, int cap, shared [BLOCKING] int *T, shared [BLOCKING
      *
      * 
      */
+    /* print_table_affinity(nitems, cap, origin); */
     int shift = 0;
     int end =0;
+    int* local_T;
+    int* local_ready;
     /* for(column = 0; column< /BCOUNT; column++){ */
-    printf("BCOUNT %d, need to do %d times", BCOUNT, (MAXCAPACITY+1)/BCOUNT);
     for(column = 0; column< (MAXCAPACITY/BCOUNT)+1; column++){
-        for(i=1; i<nitems; i++){
-            shift = column*BCOUNT;
-            end = min(shift+BCOUNT, MAXCAPACITY+1);
-            upc_forall(j=shift; j<end; j++; &T[i+j*nitems]){
+        shift = column*BCOUNT;
+        end = min(shift+BCOUNT, MAXCAPACITY+1);
+        if(MYTHREAD == upc_threadof(&T[shift*nitems])){
+            local_T = (int *)&T[shift*nitems];
+            local_ready = (int *)&ready[shift*nitems];
+        }
+        upc_forall(i=1; i<nitems; i++; &T[i+shift*nitems]){
+            wi = w[i];
+            vi = v[i];
+            /* upc_forall(j=shift; j<end; j++; &T[i+j*nitems]){ */
+            for(j=shift; j<end; j++){
+                /* assert( upc_threadof(&T[i+j*nitems]) == MYTHREAD); */
                 /* w_i > w */
                 if(w[i] > j){
-                    T[i+j*nitems] = T[(i-1)+j*nitems];
-                    ready[i+j*nitems] = 1;
+                    local_T[i+(j-shift)*nitems] = local_T[(i-1)+(j-shift)*nitems];
+                    local_ready[i+(j-shift)*nitems] = 1;
                 }
                 else{
                     while(ready[(i-1)+(j-w[i])*nitems] < 1){ }
-                    T[i+j*nitems] = max(T[(i-1)+j*nitems],T[(i-1)+(j-w[i])*nitems]+v[i]);
-                    ready[i+j*nitems] = 1;
+                    local_T[i+(j-shift)*nitems] = max(local_T[(i-1)+(j-shift)*nitems],T[(i-1)+(j-wi)*nitems]+vi);
+                    local_ready[i+(j-shift)*nitems] = 1;
                 }
                 
             }                
@@ -332,8 +342,8 @@ int main( int argc, char** argv )
     value  = (shared int *) upc_all_alloc( nitems, sizeof(int) );
     used   = (shared int *) upc_all_alloc( nitems, sizeof(int) );
     //allocate distributed arrays, use blocked distribution
-    table =  (shared [BLOCKING] int *) upc_all_alloc((nitems*(capacity+1))/BLOCKING, BLOCKING*sizeof(int));
-    ready =  (shared [BLOCKING] int *) upc_all_alloc((nitems*(capacity+1))/BLOCKING, BLOCKING*sizeof(int));
+    table =  (shared [BLOCKING] int *) upc_all_alloc((nitems*(capacity+1)), 1*sizeof(int));
+    ready =  (shared [BLOCKING] int *) upc_all_alloc((nitems*(capacity+1)), 1*sizeof(int));
     if( !weight || !value || !used || !table )
     {
         fprintf( stderr, "Failed to allocate memory" );
